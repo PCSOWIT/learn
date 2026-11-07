@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+
+<body>
+  <h2>AI 内容助手</h2>
+
+  <div>
+    <input id="username" placeholder="用户名"><br>
+    <input id="password" type="password" placeholder="密码"><br>
+    <button onclick="login()">登录</button>
+  </div>
+
+  <hr>
+  <input id="topic" placeholder="输入主题">
+  <button onclick="start()">开始生成</button>
+  <button onclick="startStream()">流式写稿</button>
+
+  <div id="result"></div>
+
+<script>
+  let token = localStorage.getItem("token");
+  let threadId = null;
+
+  async function login() {
+    const res = await fetch("http://127.0.0.1:8000/api/v1/auth/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        username: document.getElementById("username").value,
+        password: document.getElementById("password").value,
+      })
+    });
+    const data = await res.json();
+    token = data.access_token;
+    localStorage.setItem("token", token);
+    alert("登录成功");
+  }
+
+  async function start() {
+    const topic = document.getElementById("topic").value;
+    const res = await fetch("http://127.0.0.1:8000/api/v1/workflow/start", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "Authorization": "Bearer " + token},
+      body: JSON.stringify({topic: topic})
+    });
+    const data = await res.json();
+    threadId = data.thread_id;
+    showOptions(data.data.options);
+  }
+
+  function showOptions(options) {
+    const div = document.getElementById("result");
+    div.innerHTML = "<p>请选一个选题：</p>";
+    options.forEach((opt) => {
+      div.innerHTML += `<button onclick="resume('${opt}')">${opt}</button><br>`;
+    });
+  }
+
+  function showReview(data) {
+    const div = document.getElementById("result");
+    div.innerHTML = `<p>${data.message}</p><pre>${data.article}</pre>
+      <button onclick="resume('approve')">通过</button>
+      <button onclick="resume('reject')">驳回</button>`;
+  }
+
+  async function resume(answer) {
+    const res = await fetch("http://127.0.0.1:8000/api/v1/workflow/resume", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "Authorization": "Bearer " + token},
+      body: JSON.stringify({thread_id: threadId, answer: answer})
+    });
+    const data = await res.json();
+    if (data.data && data.data.article) {
+      showReview(data.data);
+    } else if (data.done) {
+      showResult(data.data);
+    } else {
+      document.getElementById("result").innerText = JSON.stringify(data, null, 2);
+    }
+  }
+
+  function showResult(data) {
+    let html = "<p>文章：</p><pre>" + data.article_content + "</pre>";
+    if (data.image_urls) {
+      html += "<p>配图：</p>";
+      data.image_urls.forEach(img => {
+        html += `<img src="http://127.0.0.1:8000/images/${img}" style="max-width:300px;"><br>`;
+      });
+    }
+    document.getElementById("result").innerHTML = html;
+  }
+
+  async function startStream() {
+  const topic = document.getElementById("topic").value;
+  const div = document.getElementById("result");
+  div.innerHTML = "<p>正在生成：</p><div id='streamText'></div>";
+
+  const res = await fetch("http://127.0.0.1:8000/api/v1/workflow/stream", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "Authorization": "Bearer " + token},
+    body: JSON.stringify({topic: topic})
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value);
+    const lines = text.split("\n\n");
+    for (let line of lines) {
+      if (line.startsWith("data: ")) {
+        document.getElementById("streamText").innerHTML += line.slice(6);
+      }
+    }
+  }
+}
+
+</script>
+
+</body>
+
+</html>
+
+
+
